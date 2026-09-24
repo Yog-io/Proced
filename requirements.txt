@@ -1,0 +1,28 @@
+# Core (required)
+numpy>=1.24
+pandas>=1.5
+opencv-python>=4.7
+scikit-image>=0.20
+shapely>=2.0
+rasterio>=1.3
+py7zr>=0.20
+global-land-mask>=1.0
+Pillow>=9.0
+pyyaml>=6.0
+
+# Tests
+pytest>=7.0
+
+# Optional — Task 1.7 / 1.9 (ERA5 + Copernicus Marine; uncomment when credentials available)
+# cdsapi>=0.6
+# netCDF4>=1.6
+# copernicusmarine>=0.10
+
+# Optional — Task 1.10 (preferred Model 2 backend; simple physics backend works without it)
+# opendrift>=0.10
+
+# Optional — Task 1.8 PostGIS load
+# psycopg2-binary>=2.9
+
+# Optional — GPU acceleration (CUDA machines only; pipeline falls back to NumPy automatically)
+# torch>=2.0

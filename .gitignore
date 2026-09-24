@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Large data artifacts — never commit raw/processed datasets
+data/raw/*
+data/processed/*
+data/scratch_unpacked/*
+data/splits/*.csv
+data/features/*
+data/ais/*.csv
+data/synthetic/model2_pairs/*
+data/master_dataset_processed*/
+data/*.7z
+!data/**/.gitkeep
+!data/features/.gitkeep
+
+# Run logs from dataset build
+logs/
+
+# Machine-local pipeline run config (paths differ per machine)
+data/state/run_config.json

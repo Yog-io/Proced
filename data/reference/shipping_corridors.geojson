@@ -1,0 +1,71 @@
+{
+  "type": "FeatureCollection",
+  "name": "shipping_corridors",
+  "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "strait_of_malacca", "weight": 1.4, "notes": "Busiest chokepoint; Singapore approaches" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [97.5, 5.5], [100.3, 3.6], [101.5, 2.5], [103.0, 1.6], [103.8, 1.2] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "gulf_of_aden_mumbai", "weight": 1.2, "notes": "Gulf of Aden -> Arabian Sea -> Mumbai" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [43.5, 12.5], [48.0, 13.0], [53.0, 14.5], [60.0, 16.5], [66.0, 18.5], [70.0, 19.5], [72.5, 19.0] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "strait_of_hormuz", "weight": 1.3, "notes": "Persian Gulf / Strait of Hormuz" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [51.5, 27.0], [54.0, 26.5], [56.5, 26.0], [57.5, 25.5] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "suez_eastern_med", "weight": 1.1, "notes": "Suez Canal approach -> Eastern Mediterranean" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [32.3, 31.3], [32.6, 30.5], [33.5, 32.5], [34.5, 34.0], [35.5, 35.5] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "english_channel_north_sea", "weight": 1.2, "notes": "English Channel / North Sea" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [1.8, 51.2], [0.0, 50.5], [-1.0, 50.0], [-4.5, 50.1], [-5.5, 50.6] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "gulf_of_mexico", "weight": 1.0, "notes": "Gulf of Mexico offshore lanes" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [ -86.0, 26.0 ], [ -88.5, 27.2 ], [ -89.0, 28.0 ], [ -90.0, 27.5 ], [ -92.5, 27.8 ] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "bengal_bay_kolkata", "weight": 0.9, "notes": "Bay of Bengal -> Kolkata approach" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [86.0, 20.5], [88.5, 20.8], [90.5, 21.5], [91.8, 22.3] ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "south_china_sea", "weight": 1.2, "notes": "South China Sea main lane" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [ [111.0, 15.5], [112.5, 12.5], [114.0, 9.5], [116.5, 6.5], [119.0, 4.0] ]
+      }
+    }
+  ]
+}
