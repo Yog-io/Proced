@@ -17,14 +17,17 @@
 ```bash
 # On dataset PC, after clone:
 export ZENODO_ROOT=/path/to/extracted/zenodo/folder   # set when known
+# Recommended output root (mirrors Zenodo layout inside a new folder):
+export DEST_DIR=/path/to/Zenodo-Dataset_final
 ./run_zenodo_build.sh "$ZENODO_ROOT"
 ```
 
 - Pipeline + raw_audit + handoff scripts + `run_all_verification.py` all execute **on the dataset PC**, pointed at `$ZENODO_ROOT`.
-- Builder PC: develop/verify tools (90/90 green) and review `BUILD_STATUS_*.md` / logs after the run.
+- Builder PC: develop/verify tools (99/99 green) and review `BUILD_STATUS_*.md` / logs after the run.
 - Brief placeholder: `<path/to/extracted/zenodo/folder>` = `$ZENODO_ROOT` on the dataset PC.
 - **Never run `extract`** — data is already extracted on the dataset PC.
 - Scope: **Zenodo only** (no Kaggle/OSD this run).
+- **Asymmetric layout supported:** sibling `*_images` / `*_mask` trees (with nested subfolders) pair across folders; mask-only trees are mirrored but not treated as scenes. Pass `--dest_dir …/Zenodo-Dataset_final` so the output tree mirrors the input under a new root.
 
 ---
 
@@ -43,7 +46,7 @@ python qa_verification/raw_audit/run_raw_folder_audit.py \
 ```bash
 python sar_dataset_pipeline.py run \
   --stage_dir <path/to/extracted/zenodo/folder> \
-  --dest_dir data/master_dataset_processed \
+  --dest_dir /path/to/Zenodo-Dataset_final \
   --output_archive data/master_dataset_v1.7z \
   --workers 8 \
   --seed 42
@@ -63,7 +66,7 @@ python scripts/generate_model2_pairs.py --pairs 2500   # default --backend simpl
 ### Step 3 — Independent QA (against real output)
 ```bash
 QA_STAGE_DIR=<path/to/extracted/zenodo/folder> \
-QA_DEST_DIR=data/master_dataset_processed \
+QA_DEST_DIR=/path/to/Zenodo-Dataset_final \
 QA_STATE_DIR=data/state \
 QA_FEATURES_DIR=data/features \
 QA_SPLITS_DIR=data/splits \
@@ -120,7 +123,8 @@ If 1–3 fail: stop per §4, write honest report. Clear stop > forced “done”
 
 ## Builder-PC facts (for report / readiness)
 
-- Tests: **90/90** (68 pipeline + 22 QA), boundary clean (`qa_verification` never imports `proced/`).
+- Tests: **99/99** (74 pipeline + 25 QA), boundary clean (`qa_verification` never imports `proced/`).
+- Asymmetric Zenodo layout: sibling `*_images` / `*_mask` trees + nested subfolders paired; folder-based mask detection; output mirrors structure under `--dest_dir` (use `Zenodo-Dataset_final`).
 - `raw_audit/` modules: `discover_tree`, `check_integrity`, `check_pairing`, `check_duplicates`, `run_raw_folder_audit`.
 - Env: Python 3.9.6, rasterio 1.4.3, py7zr 1.0.0, 8 CPUs; no system `7z` CLI (pipeline uses py7zr fallback).
 - `data/` on builder PC is scaffolding only (`.gitkeep`, corridors, empty state) — **not** the dataset.
@@ -147,7 +151,7 @@ If 1–3 fail: stop per §4, write honest report. Clear stop > forced “done”
 1. ~~Exact absolute path of extracted tree on the dataset PC?~~ → supplied as `$ZENODO_ROOT` / CLI arg at run time.
 2. ~~How is execution transferred?~~ → **clone Proced onto dataset PC**; run `./run_zenodo_build.sh <path>` there.
 3. Expected worker count on dataset PC (brief says `--workers 8`)?
-4. Disk headroom for `data/master_dataset_processed` + `master_dataset_v1.7z`?
+4. Disk headroom for `Zenodo-Dataset_final` + `master_dataset_v1.7z`?
 
 ---
 
@@ -168,14 +172,14 @@ export WORKERS=8
 python qa_verification/raw_audit/run_raw_folder_audit.py --root "$ZENODO_ROOT"
 python sar_dataset_pipeline.py run \
   --stage_dir "$ZENODO_ROOT" \
-  --dest_dir data/master_dataset_processed \
+  --dest_dir "${DEST_DIR:-Zenodo-Dataset_final}" \
   --output_archive data/master_dataset_v1.7z \
   --workers "$WORKERS" --seed "$SEED" 2>&1 | tee logs/step1_pipeline.log
 python scripts/join_wind.py
 python scripts/generate_ais.py
 python scripts/generate_model2_pairs.py --pairs 2500
 QA_STAGE_DIR="$ZENODO_ROOT" \
-QA_DEST_DIR=data/master_dataset_processed \
+QA_DEST_DIR="${DEST_DIR:-Zenodo-Dataset_final}" \
 QA_STATE_DIR=data/state \
 QA_FEATURES_DIR=data/features \
 QA_SPLITS_DIR=data/splits \

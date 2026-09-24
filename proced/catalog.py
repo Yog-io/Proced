@@ -68,6 +68,58 @@ def _is_mask_name(stem: str) -> bool:
     return any(t in MASK_NAME_TOKENS for t in toks)
 
 
+def _dir_tokens(name: str) -> set:
+    return {t for t in re.split(r"[_\-\s.]+", name.lower()) if t}
+
+
+def _is_mask_dir_name(name: str) -> bool:
+    """Folder name marks a mask tree (``*_mask``, ``masks``, ``labels``, …)."""
+    toks = _dir_tokens(name)
+    if toks & set(MASK_NAME_TOKENS):
+        return True
+    low = name.lower()
+    return (
+        low.endswith(("_mask", "_masks", "_label", "_labels", "_gt"))
+        or low.startswith(("mask_", "masks_", "label_", "labels_"))
+        or low in ("mask", "masks", "gt", "labels")
+    )
+
+
+def _is_image_dir_name(name: str) -> bool:
+    toks = _dir_tokens(name)
+    return bool(toks & {"images", "image", "imgs", "img", "scenes", "scene", "sar"})
+
+
+def _rel_parent(rel_path: str) -> str:
+    if not rel_path:
+        return ""
+    p = str(Path(rel_path).parent)
+    return "" if p == "." else p.replace("\\", "/")
+
+
+def _is_mask_rel(rel_path: str, stem: str) -> bool:
+    """Mask if stem has mask tokens OR any ancestor folder is a mask tree."""
+    if _is_mask_name(stem):
+        return True
+    parent = _rel_parent(rel_path)
+    if not parent:
+        return False
+    return any(_is_mask_dir_name(part) for part in parent.split("/"))
+
+
+def _strip_mask_tokens(stem: str) -> str:
+    low = stem
+    for suf in ("_mask", "_masks", "_label", "_labels", "_gt", "_lbl", "_ann"):
+        if low.lower().endswith(suf):
+            low = low[: -len(suf)]
+            break
+    for pre in ("mask_", "masks_", "label_", "labels_", "gt_", "lbl_", "ann_"):
+        if low.lower().startswith(pre):
+            low = low[len(pre):]
+            break
+    return low
+
+
 def _strip_pol_suffix(stem: str) -> Tuple[str, Optional[str]]:
     """('scene_VV', 'scene', 'VV') from pol-suffixed stems; pol = None otherwise."""
     m = re.search(r"(?:^|[_\-.])(vv|vh)$", stem, re.IGNORECASE)
@@ -85,6 +137,8 @@ def _dataset_default_label(rel_path: str, cfg: PipelineConfig) -> str:
             return label
     if "lookalike" in low or "look-alike" in low or "look_alike" in low:
         return "lookalike"
+    if "oil_spill" in low or "oil-spill" in low or "oilspill" in low:
+        return "oil"
     return "oil"
 
 
@@ -100,9 +154,91 @@ def _calibration_for(rel_path: str, dtype: str, cfg: PipelineConfig) -> bool:
     return dtype.startswith("float")
 
 
-def _find_mask(scene_base: str, folder: Path, mask_files: List[Path]) -> Optional[Path]:
+def _stem_key(stem: str) -> str:
+    """Normalized pairing key: no pol suffix, no mask tokens, lowercased."""
+    base, _ = _strip_pol_suffix(stem)
+    base = _strip_mask_tokens(base)
+    return base.lower()
+
+
+def _parallel_mask_rel(rel_folder: str) -> Optional[str]:
+    """Map an image-tree folder to its parallel mask-tree folder.
+
+    ``01_…_images/sub`` → ``01_…_mask/sub`` (any depth; first matching
+    image-like component is swapped). Returns None if nothing to swap.
+    """
+    if not rel_folder:
+        return None
+    parts = rel_folder.split("/")
+    out: List[str] = []
+    swapped = False
+    img_to_mask = (
+        ("_images_and_ground_truth", "_mask"),
+        ("_images", "_mask"),
+        ("_image", "_mask"),
+        ("_imgs", "_mask"),
+        ("_img", "_mask"),
+    )
+    for part in parts:
+        low = part.lower()
+        new = part
+        for suf_img, suf_mask in img_to_mask:
+            if low.endswith(suf_img):
+                new = part[: -len(suf_img)] + suf_mask
+                break
+        else:
+            if low in ("images", "image", "imgs", "img"):
+                new = "mask" if part.islower() else ("Mask" if part[:1].isupper() else "mask")
+        if new != part:
+            swapped = True
+        out.append(new)
+    return "/".join(out) if swapped else None
+
+
+def _mask_search_dirs(rel_folder: str) -> List[str]:
+    """Candidate relative dirs that may hold the mask for this image folder."""
+    dirs: List[str] = [rel_folder] if rel_folder else [""]
+    seen = set(dirs)
+
+    def _add(d: Optional[str]) -> None:
+        if d is not None and d not in seen:
+            seen.add(d)
+            dirs.append(d)
+
+    _add(_parallel_mask_rel(rel_folder))
+    # conventional sibling names at the same parent
+    parent = _rel_parent(rel_folder) if rel_folder else ""
+    leaf = rel_folder.split("/")[-1] if rel_folder else ""
+    for name in ("masks", "mask", "labels", "label", "gt", "annotations"):
+        _add(f"{parent}/{name}" if parent else name)
+        # swap image leaf → mask leaf under same parent
+        if leaf and _is_image_dir_name(leaf):
+            base = re.sub(
+                r"(_images|_image|_imgs|_img|images|image|imgs|img)$",
+                "",
+                leaf,
+                flags=re.IGNORECASE,
+            )
+            _add(f"{parent}/{base}_{name}" if parent else f"{base}_{name}")
+            _add(f"{parent}/{name}_{base}" if parent else f"{name}_{base}")
+    # parent itself if it is a mask tree (image nested under mask root — rare)
+    if rel_folder and any(_is_mask_dir_name(p) for p in rel_folder.split("/")):
+        _add(rel_folder)
+    return dirs
+
+
+def _find_mask(
+    scene_base: str,
+    folder: Path,
+    mask_files: List[Path],
+    *,
+    root: Optional[Path] = None,
+    rel_folder: str = "",
+    mask_index: Optional[Dict[str, List[Path]]] = None,
+) -> Optional[Path]:
     """Several real-world naming conventions for mask files."""
     base_l = scene_base.lower()
+    base_key = _stem_key(scene_base)
     candidates: List[Path] = []
     for mf in mask_files:
         stem = mf.stem.lower()
@@ -120,17 +256,68 @@ def _find_mask(scene_base: str, folder: Path, mask_files: List[Path]) -> Optiona
             candidates.append(mf)
         elif stem in (f"{base_l}_label", f"label_{base_l}", f"{base_l}_gt", f"{base_l}_ann"):
             candidates.append(mf)
-    # Prefer same-folder, then masks/labels/gt sibling dirs
+        elif _stem_key(mf.stem) == base_key:
+            candidates.append(mf)
+    # Prefer same-folder, then parallel mask tree, then conventional subdirs
     if candidates:
-        candidates.sort(key=lambda p: (p.parent != folder, len(p.parts)))
+        def _rank(p: Path) -> tuple:
+            try:
+                rel = str(p.relative_to(root)) if root else str(p)
+            except ValueError:
+                rel = str(p)
+            par = _rel_parent(rel.replace("\\", "/"))
+            same = 0 if (root and folder in p.parents) or p.parent == folder else 1
+            parallel = 0 if _parallel_mask_rel(rel_folder) == par else 1
+            return (same, parallel, len(p.parts))
+        candidates.sort(key=_rank)
         return candidates[0]
-    # Sibling conventional subfolders
-    for sub in ("masks", "mask", "labels", "label", "gt", "annotations"):
-        d = folder / sub
-        if d.is_dir():
+
+    # Sibling / conventional directories (with or without prebuilt index)
+    wanted_names = {
+        f"{base_l}.tif", f"{base_l}.tiff", f"{base_l}.png", f"{base_l}.jp2",
+        f"{base_l}_mask.tif", f"{base_l}_mask.tiff", f"{base_l}_mask.png",
+        f"mask_{base_l}.tif", f"mask_{base_l}.png",
+        f"{base_l}_label.tif", f"{base_l}_label.png",
+        f"{base_l}_gt.tif", f"{base_l}_gt.png",
+    }
+    if root is not None:
+        for rel_dir in _mask_search_dirs(rel_folder):
+            d = root / rel_dir if rel_dir else root
+            if not d.is_dir():
+                continue
             for mf in sorted(d.iterdir()):
-                if _is_raster(mf) and _strip_pol_suffix(mf.stem)[0].lower() == base_l:
+                if not _is_raster(mf):
+                    continue
+                rel_cand = str(Path(rel_dir) / mf.name) if rel_dir else mf.name
+                # Only consider files classified as masks (stem or mask-tree folder).
+                # Never treat the image itself as its own mask.
+                if not (_is_mask_rel(rel_cand, mf.stem) or _is_mask_name(mf.stem)):
+                    continue
+                if _stem_key(mf.stem) == base_key or mf.name.lower() in wanted_names:
                     return mf
+
+    # Global stem index (built over entire tree) — prefer parallel mask dirs
+    if mask_index:
+        hits = mask_index.get(base_key) or mask_index.get(base_l) or []
+        if hits:
+            par = _parallel_mask_rel(rel_folder)
+            if par:
+                for h in hits:
+                    try:
+                        h_rel = str(h.relative_to(root)) if root else str(h)
+                    except ValueError:
+                        h_rel = str(h)
+                    if _rel_parent(h_rel.replace("\\", "/")) == par or h_rel.replace("\\", "/").startswith(par + "/"):
+                        return h
+            # Prefer any path under a mask-named folder
+            for h in hits:
+                try:
+                    h_rel = str(h.relative_to(root)) if root else str(h)
+                except ValueError:
+                    h_rel = str(h)
+                if _is_mask_rel(h_rel.replace("\\", "/"), h.stem):
+                    return h
+            return hits[0]
     return None
 
 
@@ -168,10 +355,21 @@ def scan_tree(cfg: PipelineConfig) -> Catalog:
         if rasters:
             folder_scenes_raw.append((rel, folder, rasters))
 
+    # Global mask index by normalized stem key (for cross-tree sibling pairing)
+    mask_index: Dict[str, List[Path]] = {}
+    for rel, _folder, rasters in folder_scenes_raw:
+        for p in rasters:
+            if _is_mask_rel(str(Path(rel) / p.name) if rel else p.name, p.stem):
+                key = _stem_key(p.stem)
+                mask_index.setdefault(key, []).append(p)
+
     # First pass: build per-folder (base → band files), masks
     prelim: List[dict] = []
     for rel, folder, rasters in folder_scenes_raw:
-        masks = [p for p in rasters if _is_mask_name(p.stem)]
+        masks = [
+            p for p in rasters
+            if _is_mask_rel(str(Path(rel) / p.name) if rel else p.name, p.stem)
+        ]
         non_masks = [p for p in rasters if p not in masks]
         # Group pol-split files by base stem
         groups: Dict[str, Dict[str, Path]] = {}
@@ -230,7 +428,10 @@ def scan_tree(cfg: PipelineConfig) -> Catalog:
                 has_dual = len([t for t in tags if t in ("VV", "VH")]) >= 2 or count >= 2
                 rel_primary = str((Path(rel) / files[0].name) if rel else files[0].name)
                 is_calibrated = _calibration_for(rel_primary, prof["dtype"], cfg)
-                mask_path = _find_mask(base, folder, masks)
+                mask_path = _find_mask(
+                    base, folder, masks,
+                    root=root, rel_folder=rel, mask_index=mask_index,
+                )
                 # Mask-only folders: rasters all masks → no scene entries — handled above
                 cat.scenes.append(SceneRecord(
                     scene_id=_unique_id(rel, base),

@@ -4,7 +4,8 @@
 #
 # Usage:
 #   ./run_zenodo_build.sh /path/to/extracted/zenodo/folder
-#   SEED=42 WORKERS=8 ./run_zenodo_build.sh "$ZENODO_ROOT"
+#   SEED=42 WORKERS=8 DEST_DIR=/path/to/Zenodo-Dataset_final ./run_zenodo_build.sh "$ZENODO_ROOT"
+# Default DEST_DIR: sibling folder named Zenodo-Dataset_final next to $ZENODO_ROOT.
 #
 # Exit codes:
 #   0  all gates passed (or stopped cleanly with report written per §4)
@@ -31,13 +32,19 @@ if [[ -z "$ZENODO_ROOT" || ! -d "$ZENODO_ROOT" ]]; then
 fi
 ZENODO_ROOT="$(cd "$ZENODO_ROOT" && pwd)"
 
+# Output root: mirror of the input tree under a new folder (Zenodo-Dataset_final).
+# Override with DEST_DIR=/abs/path if desired.
+if [[ -z "${DEST_DIR:-}" ]]; then
+  DEST_DIR="$(dirname "$ZENODO_ROOT")/Zenodo-Dataset_final"
+fi
+
 STEP0_JSON="$ZENODO_ROOT/raw_folder_audit_report.json"
 STEP1_LOG="$LOG_DIR/step1_pipeline_${DATE_TAG}.log"
 STEP2_LOG="$LOG_DIR/step2_handoff_${DATE_TAG}.log"
 STEP3_LOG="$LOG_DIR/step3_qa_${DATE_TAG}.log"
 STATUS_MD="$ROOT_REPO/BUILD_STATUS_${DATE_TAG}.md"
-PIPELINE_SUMMARY="$ROOT_REPO/data/master_dataset_processed/pipeline_summary.json"
-QA_REPORT="$ROOT_REPO/data/master_dataset_processed/verification_report.json"
+PIPELINE_SUMMARY="$DEST_DIR/pipeline_summary.json"
+QA_REPORT="$DEST_DIR/verification_report.json"
 # QA may also write under cwd fallback
 QA_REPORT_FALLBACK="$ROOT_REPO/verification_report.json"
 
@@ -118,8 +125,9 @@ log "Step 0 gate passed (quarantine/orphans/dups logged in report — proceed)"
 
 # ---------------------------------------------------------------- Step 1
 log "Step 1 — pipeline run seed=$SEED workers=$WORKERS (NO extract)"
-DEST_DIR="$ROOT_REPO/data/master_dataset_processed"
+# DEST_DIR resolved above (default: sibling Zenodo-Dataset_final of ZENODO_ROOT)
 OUT_ARCHIVE="$ROOT_REPO/data/master_dataset_v1.7z"
+mkdir -p "$DEST_DIR"
 python3 sar_dataset_pipeline.py run \
   --stage_dir "$ZENODO_ROOT" \
   --dest_dir "$DEST_DIR" \

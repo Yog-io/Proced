@@ -1,5 +1,7 @@
 """Catalog: VV/VH pairing, mask discovery, tree mirror, calibration detect."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import rasterio
@@ -113,3 +115,115 @@ def test_all_dirs_includes_root_and_children(tmp_path):
     assert "" in cat.all_dirs
     assert "x" in cat.all_dirs
     assert "x/y" in cat.all_dirs
+
+
+def _write_zenodo_asymmetric(root: Path) -> None:
+    """Sibling *_images / *_mask trees with nested subfolders (no co-located masks)."""
+    rng = np.random.default_rng(3)
+    img = rng.uniform(0.01, 0.3, (32, 32)).astype(np.float32)
+    m = np.zeros((32, 32), np.uint8)
+    m[5:15, 5:15] = 1
+
+    pairs = [
+        ("01_Train_Val_Oil_Spill_images", "01_Train_Val_Oil_Spill_mask", "pass1/sceneA"),
+        ("01_Train_Val_Lookalike_images", "01_Train_Val_Lookalike_mask", "pass1/sceneB"),
+        ("01_Train_Val_No_Oil_images", "01_Train_Val_No_Oil_mask", "sceneC"),
+    ]
+    for img_dir, mask_dir, rel in pairs:
+        _write_tif(root / img_dir / f"{rel}.tif", img)
+        _write_tif(root / mask_dir / f"{rel}.tif", m, dtype="uint8", crs=None)
+
+    # test split: co-located image + mask under mixed root
+    _write_tif(root / "02_Test_images_and_ground_truth" / "t1" / "img.tif", img)
+    _write_tif(
+        root / "02_Test_images_and_ground_truth" / "t1" / "img_mask.tif",
+        m, dtype="uint8", crs=None,
+    )
+
+
+def test_sibling_image_mask_trees_paired(tmp_path):
+    _write_zenodo_asymmetric(tmp_path)
+    cat = scan_tree(PipelineConfig(stage_dir=tmp_path))
+    scene_rels = {s.rel_folder for s in cat.scenes}
+    assert "01_Train_Val_Oil_Spill_images/pass1" in scene_rels
+    assert "01_Train_Val_Lookalike_images/pass1" in scene_rels
+    assert "01_Train_Val_No_Oil_images" in scene_rels
+    # mask trees must not become scenes
+    assert not any(r.endswith("_mask") or "/_mask" in r for r in scene_rels)
+    assert not any("_mask" in r for r in scene_rels)
+    assert all(s.mask_present for s in cat.scenes), [
+        (s.rel_folder, s.source_scene_name) for s in cat.scenes if not s.mask_present
+    ]
+    oil = next(s for s in cat.scenes if s.rel_folder.startswith("01_Train_Val_Oil_Spill"))
+    assert oil.mask_path is not None
+    assert "01_Train_Val_Oil_Spill_mask" in str(oil.mask_path)
+    assert oil.mask_path.name == "sceneA.tif"
+
+
+def test_nested_asymmetric_subfolders(tmp_path):
+    _write_zenodo_asymmetric(tmp_path)
+    cat = scan_tree(PipelineConfig(stage_dir=tmp_path))
+    nested = [s for s in cat.scenes if "/" in Path(s.band_files[0]).name or s.rel_folder.count("/") >= 1]
+    # oil/lookalike scenes live under pass1/ inside their *_images tree
+    assert any(s.source_scene_name == "sceneA" for s in cat.scenes)
+    sceneA = next(s for s in cat.scenes if s.source_scene_name == "sceneA")
+    assert sceneA.rel_folder == "01_Train_Val_Oil_Spill_images/pass1"
+    assert sceneA.mask_path is not None
+    assert sceneA.mask_path.name == "sceneA.tif"
+
+
+def test_folder_based_mask_not_treated_as_scene(tmp_path):
+    # plain stem under a *_mask folder → mask only, not a scene
+    _write_tif(
+        tmp_path / "01_Train_Val_Oil_Spill_mask" / "pass2" / "plain.tif",
+        np.zeros((16, 16), np.uint8), dtype="uint8", crs=None,
+    )
+    cat = scan_tree(PipelineConfig(stage_dir=tmp_path))
+    assert cat.scenes == []
+    assert any("01_Train_Val_Oil_Spill_mask" in d for d in cat.all_dirs)
+
+
+def test_label_from_zenodo_folder_names(tmp_path):
+    _write_zenodo_asymmetric(tmp_path)
+    cat = scan_tree(PipelineConfig(stage_dir=tmp_path))
+    labels = {s.rel_folder: s.default_label for s in cat.scenes}
+    assert labels["01_Train_Val_Lookalike_images/pass1"] == "lookalike"
+    assert labels["01_Train_Val_Oil_Spill_images/pass1"] == "oil"
+    assert labels["01_Train_Val_No_Oil_images"] == "oil"
+
+
+def test_tree_mirror_asymmetric_directories(tmp_path):
+    _write_zenodo_asymmetric(tmp_path)
+    cat = scan_tree(PipelineConfig(stage_dir=tmp_path))
+    expected = {
+        "01_Train_Val_Oil_Spill_images",
+        "01_Train_Val_Oil_Spill_images/pass1",
+        "01_Train_Val_Oil_Spill_mask",
+        "01_Train_Val_Oil_Spill_mask/pass1",
+        "01_Train_Val_Lookalike_images",
+        "01_Train_Val_Lookalike_images/pass1",
+        "01_Train_Val_Lookalike_mask",
+        "01_Train_Val_Lookalike_mask/pass1",
+        "01_Train_Val_No_Oil_images",
+        "01_Train_Val_No_Oil_mask",
+        "02_Test_images_and_ground_truth",
+        "02_Test_images_and_ground_truth/t1",
+    }
+    assert expected.issubset(set(cat.all_dirs))
+    # mask-only folders = dirs that contain masks but no scene entries (leaves)
+    assert "01_Train_Val_Oil_Spill_mask/pass1" in cat.mask_only_folders
+    assert "01_Train_Val_Lookalike_mask/pass1" in cat.mask_only_folders
+    assert "01_Train_Val_No_Oil_mask" in cat.mask_only_folders
+    assert "02_Test_images_and_ground_truth/t1" not in cat.mask_only_folders
+
+
+def test_parallel_mask_folder_mapping():
+    from proced.catalog import _parallel_mask_rel, _mask_search_dirs
+
+    assert _parallel_mask_rel("01_Train_Val_Oil_Spill_images") == "01_Train_Val_Oil_Spill_mask"
+    assert _parallel_mask_rel("01_Train_Val_Oil_Spill_images/pass1") == "01_Train_Val_Oil_Spill_mask/pass1"
+    assert _parallel_mask_rel("images/sub") == "mask/sub"
+    assert _parallel_mask_rel("kaggle") is None
+    dirs = _mask_search_dirs("01_Train_Val_Oil_Spill_images/pass1")
+    assert "01_Train_Val_Oil_Spill_mask/pass1" in dirs
+    assert "01_Train_Val_Oil_Spill_images/pass1" in dirs

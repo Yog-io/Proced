@@ -45,6 +45,80 @@ def is_mask_stem(stem: str) -> bool:
     return any(low.endswith(suf) for suf in MASK_SUFFIX_TOKENS)
 
 
+def is_mask_dir_name(name: str) -> bool:
+    """Folder name marks a mask tree (``*_mask``, ``masks``, ``labels``, …)."""
+    toks = {t for t in name.replace("-", "_").replace(".", "_").replace(" ", "_").split("_") if t}
+    if any(t.lower() in MASK_NAME_TOKENS for t in toks):
+        return True
+    low = name.lower()
+    return (
+        low.endswith(("_mask", "_masks", "_label", "_labels", "_gt"))
+        or low.startswith(("mask_", "masks_", "label_", "labels_"))
+        or low in ("mask", "masks", "gt", "labels")
+    )
+
+
+def is_mask_rel(folder: str, stem: str) -> bool:
+    """Mask if stem has mask tokens OR any ancestor folder is a mask tree."""
+    if is_mask_stem(stem):
+        return True
+    if not folder:
+        return False
+    return any(is_mask_dir_name(part) for part in folder.replace("\\", "/").split("/"))
+
+
+def parallel_mask_folder(folder: str) -> str:
+    """Map an image-tree folder to its parallel mask-tree folder (``*_images`` → ``*_mask``)."""
+    if not folder:
+        return folder
+    parts = folder.replace("\\", "/").split("/")
+    out = []
+    for part in parts:
+        low = part.lower()
+        new = part
+        for suf_img, suf_mask in (
+            ("_images_and_ground_truth", "_mask"),
+            ("_images", "_mask"),
+            ("_image", "_mask"),
+            ("_imgs", "_mask"),
+            ("_img", "_mask"),
+        ):
+            if low.endswith(suf_img):
+                new = part[: -len(suf_img)] + suf_mask
+                break
+        else:
+            if low in ("images", "image", "imgs", "img"):
+                new = "mask" if part.islower() else ("Mask" if part[:1].isupper() else "mask")
+        out.append(new)
+    return "/".join(out)
+
+
+def parallel_image_folder(folder: str) -> str:
+    """Inverse of ``parallel_mask_folder``: mask tree → image tree."""
+    if not folder:
+        return folder
+    parts = folder.replace("\\", "/").split("/")
+    out = []
+    for part in parts:
+        low = part.lower()
+        new = part
+        for suf_mask, suf_img in (
+            ("_mask", "_images"),
+            ("_masks", "_images"),
+            ("_label", "_images"),
+            ("_labels", "_images"),
+            ("_gt", "_images"),
+        ):
+            if low.endswith(suf_mask):
+                new = part[: -len(suf_mask)] + suf_img
+                break
+        else:
+            if low in ("mask", "masks", "labels", "label", "gt"):
+                new = "images" if part.islower() else ("Images" if part[:1].isupper() else "images")
+        out.append(new)
+    return "/".join(out)
+
+
 def discover_tree(root: Path) -> TreeDiscovery:
     root = Path(root)
     out = TreeDiscovery(root=root)
@@ -77,7 +151,7 @@ def discover_tree(root: Path) -> TreeDiscovery:
             stem = p.stem
             item = DiscoveredFile(
                 path=p, rel=rel, folder=folder, suffix=suffix, stem=stem,
-                is_mask_by_name=is_mask_stem(stem), size_bytes=size,
+                is_mask_by_name=is_mask_rel(folder, stem), size_bytes=size,
             )
             out.files.append(item)
             out.rasters.append(item)

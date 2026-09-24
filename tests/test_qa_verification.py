@@ -462,3 +462,65 @@ def test_raw_audit_ready_on_clean_tree(tmp_path):
     assert payload["ready_for_pipeline"] is True
     assert payload["counts"]["open_failed"] == 0
     assert payload["pairing"]["orphan_images"] == []
+
+
+def _build_asymmetric_zenodo(root: Path) -> Path:
+    """Sibling *_images / *_mask trees with nested subfolders (Zenodo layout)."""
+    rng = np.random.default_rng(2)
+    img = rng.uniform(0.01, 0.3, (64, 64)).astype(np.float32)
+    mask = np.zeros((64, 64), np.uint8)
+    mask[10:30, 10:30] = 1
+
+    _write_tif(root / "01_Train_Val_Oil_Spill_images" / "pass1" / "sceneA.tif", img, "float32")
+    _write_tif(root / "01_Train_Val_Oil_Spill_mask" / "pass1" / "sceneA.tif", mask, "uint8", crs=None)
+    _write_tif(root / "01_Train_Val_Lookalike_images" / "sceneB.tif", img, "float32")
+    _write_tif(root / "01_Train_Val_Lookalike_mask" / "sceneB.tif", mask, "uint8", crs=None)
+    # orphan image with no parallel mask
+    _write_tif(root / "01_Train_Val_No_Oil_images" / "lonely.tif", img, "float32")
+    return root
+
+
+def test_raw_audit_folder_based_mask_classification(tmp_path):
+    from qa_verification.raw_audit.discover_tree import discover_tree
+
+    root = _build_asymmetric_zenodo(tmp_path / "zen")
+    disc = discover_tree(root)
+    mask_rels = [f.rel for f in disc.masks]
+    image_rels = [f.rel for f in disc.images]
+    # plain stems under *_mask folders are masks
+    assert any(r.startswith("01_Train_Val_Oil_Spill_mask/") for r in mask_rels)
+    assert any(r.startswith("01_Train_Val_Lookalike_mask/") for r in mask_rels)
+    # images trees are not masks
+    assert all("_mask/" not in r for r in image_rels)
+    assert any(r.startswith("01_Train_Val_Oil_Spill_images/") for r in image_rels)
+
+
+def test_raw_audit_sibling_tree_pairing(tmp_path):
+    from qa_verification.raw_audit.check_pairing import check_pairing
+    from qa_verification.raw_audit.discover_tree import discover_tree
+
+    root = _build_asymmetric_zenodo(tmp_path / "zen")
+    disc = discover_tree(root)
+    res = check_pairing(disc)
+    orphan_rels = [o["rel"] for o in res.orphan_images]
+    # cross-sibling pairs count as matched
+    assert not any("sceneA" in r for r in orphan_rels)
+    assert not any("sceneB" in r for r in orphan_rels)
+    # lonely image has no mask anywhere
+    assert any("lonely" in r for r in orphan_rels)
+    assert res.matched_pairs >= 2
+    # mask-only trees not flagged as orphan masks
+    assert not any("01_Train_Val_Oil_Spill_mask" in o["rel"] for o in res.orphan_masks)
+    assert not any("01_Train_Val_Lookalike_mask" in o["rel"] for o in res.orphan_masks)
+
+
+def test_raw_audit_asymmetric_ready_when_paired(tmp_path):
+    from qa_verification.raw_audit.run_raw_folder_audit import run_audit
+
+    root = _build_asymmetric_zenodo(tmp_path / "zen")
+    # remove the deliberate orphan so tree is ready
+    lonely = root / "01_Train_Val_No_Oil_images" / "lonely.tif"
+    lonely.unlink()
+    payload = run_audit(root, out_path=tmp_path / "r.json", sample_values=False)
+    assert payload["ready_for_pipeline"] is True
+    assert payload["pairing"]["orphan_images"] == []

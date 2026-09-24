@@ -30,11 +30,19 @@ python sar_dataset_pipeline.py extract \
     --stage_dir data/scratch_unpacked
 
 # 2) Full run scan→validate (no --archive here; exits 2 if validation fails)
+#    Zenodo-style asymmetric tree (sibling *_images / *_mask folders) is supported;
+#    the output tree mirrors the input layout under --dest_dir.
 python sar_dataset_pipeline.py run \
     --stage_dir data/scratch_unpacked \
     --dest_dir data/master_dataset_processed \
     --output_archive data/master_dataset_v1.7z \
     --workers 8
+
+# Example for the Zenodo PC layout (D:/Zenodo-dataset/ … → Zenodo-Dataset_final/):
+# python sar_dataset_pipeline.py run \
+#     --stage_dir /path/to/Zenodo-dataset \
+#     --dest_dir /path/to/Zenodo-Dataset_final \
+#     --workers 8 --seed 42
 
 # Or run stages one at a time (intermediate artifacts under --state_dir):
 python sar_dataset_pipeline.py scan     --stage_dir data/scratch_unpacked
@@ -54,7 +62,7 @@ python scripts/validate_dataset.py
 python scripts/join_wind.py            # → data/features/lookalike_training_data.csv  (Model Training)
 python scripts/generate_ais.py         # → data/ais/ais_tracks.csv                    (Backend)
 python scripts/generate_model2_pairs.py --pairs 2500   # → data/synthetic/model2_pairs/ (Model Training)
-pytest tests/ -q                       # 68 tests incl. end-to-end + standalone stages
+pytest tests/ -q                       # 99 tests incl. end-to-end + standalone stages
 ```
 
 ---
@@ -106,7 +114,7 @@ fallback), deterministic per-scene RNG seeds (`--seed`).
 | 10 | **Synthetic-location provenance incomplete** — no `source_corridor_id`, `offset_km`, or `synthetic_timestamp_utc` (guide §2.2 Steps 3–4), no corridor GeoJSON (Step 1). | Corridors live in `data/reference/shipping_corridors.geojson` (8 lanes incl. Suez & South China Sea); every synthetic row carries full provenance + uniform 2016–2025 timestamp; written to `synthetic_geo_assignments.csv`. |
 | 11 | **Synthetic bbox corners were a fixed `0.02°` box** regardless of pixel size/latitude. | Scene-level synthetic georef at ~10 m/px with `cos(lat)` longitude scaling (`geo.synthetic_scene_georef`). |
 | 12 | **Georeference test `gt[0]==0 and gt[3]==0`** false-negatives (valid origin at 0,0) and false-positives (identity transform without CRS → bogus "real" coordinates). | `raster_io.has_real_georeference`: requires CRS **and** non-identity transform. |
-| 13 | **Mask pairing** only handled `stem.replace("_mask","") in scene_name`; size mismatches would crash or silently misalign. | Convention matcher (same stem, `mask_*`, `*_mask/_label/_gt`, sibling `masks/` dirs); dimension mismatch ⇒ scene treated as unlabeled (never resize labels silently). |
+| 13 | **Mask pairing** only handled `stem.replace("_mask","") in scene_name`; size mismatches would crash or silently misalign. | Convention matcher (same stem, `mask_*`, `*_mask/_label/_gt`, sibling `masks/` dirs) **plus asymmetric sibling trees** (`*_images` → `*_mask` at any depth, folder-based mask detection, global stem index); dimension mismatch ⇒ scene treated as unlabeled (never resize labels silently). |
 | 14 | **Aspect ratio from `cv2.fitEllipse` without sorting axes** → could return < 1. | Major/minor sorted; `minAreaRect` fallback for tiny contours. |
 | 15 | **`parent_group_id` 8-hex chars** (collision-prone), `"none"` for compact crops. | Full `uuid4` hex-12 per object group; negatives get their own group id (never empty → null-free CSVs). |
 | 16 | **`bool(nan) is True` class of bugs** in metadata coercion (NaN → `"Y"`). | All normalisers check NaN/None first (`metadata._is_nan`); unit-tested. |
@@ -255,18 +263,20 @@ Console summary prints pass/warn/fail counts + `ready for pipeline: yes/no`
 ## Tests
 
 ```bash
-pytest tests/ -q          # 90 tests (68 pipeline + 22 QA)
+pytest tests/ -q          # 99 tests (74 pipeline + 25 QA)
 pytest tests/ -q -m "not slow"   # skip the end-to-end / standalone-stage runs
 ```
 
 Covers: radiometry round-trip & domain detection · perpendicular-offset
 regression · corridor provenance · compact/overflow/truncated/negative crop
 invariants · C.0 features (incl. damping/NDPI/GLCM) · group-split leakage ·
-catalog pairing/calibration/labels · metadata null-freeness · 7z round-trip ·
+catalog pairing/calibration/labels · **asymmetric sibling image/mask trees**
+(Zenodo `*_images` / `*_mask` layout, nested subfolders, folder-based mask
+detection, tree mirror) · metadata null-freeness · 7z round-trip ·
 validation checklist · **state serialisation round-trips** · **full Stage 0–6
 end-to-end** (extract → run, bit depth, tree equivalence, provenance, splits,
 archive) · **every stage runnable standalone** · `run` rejects `--archive`
 with a hint to use `extract` · **independent QA suite** (boundary rule, dB
 round-trip, shape/plan recompute, full `run_all_verification` on a fixture) ·
 **raw-folder pre-pipeline audit** (discovery, integrity, pairing, duplicates,
-CLI exit codes).
+CLI exit codes, sibling-tree pairing).
