@@ -35,8 +35,8 @@ python sar_dataset_pipeline.py extract \
 python sar_dataset_pipeline.py run \
     --stage_dir data/scratch_unpacked \
     --dest_dir data/master_dataset_processed \
-    --output_archive data/master_dataset_v1.7z \
-    --workers 8
+    --output_archive data/master_dataset_v1.7z
+#    (--workers N is optional — it defaults to every CPU core)
 
 # Example for the Zenodo PC layout (D:/Zenodo-dataset/ … → Zenodo-Dataset_final/):
 # python sar_dataset_pipeline.py run \
@@ -62,7 +62,7 @@ python scripts/validate_dataset.py
 python scripts/join_wind.py            # → data/features/lookalike_training_data.csv  (Model Training)
 python scripts/generate_ais.py         # → data/ais/ais_tracks.csv                    (Backend)
 python scripts/generate_model2_pairs.py --pairs 2500   # → data/synthetic/model2_pairs/ (Model Training)
-pytest tests/ -q                       # 99 tests incl. end-to-end + standalone stages
+pytest tests/ -q                       # 111 tests incl. end-to-end + standalone stages
 ```
 
 ---
@@ -136,6 +136,9 @@ fallback), deterministic per-scene RNG seeds (`--seed`).
 * **Executor recycling** (`--pool-chunk`) — bounds worker RSS on long runs without needing Python 3.11 `max_tasks_per_child`.
 * **`rasterio` as the GDAL binding** — identical GDAL semantics, pip-installable wheels, and the exact `rasterio.windows` primitive the refinement (A.4) endorses; `gdalinfo` still used for bit-depth checks when present (falls back to rasterio).
 * **Per-worker GDAL cache** defaults to 256 MB (configurable) so N workers can't silently claim `N × 512 MB`.
+* **All cores by default** — `--workers` defaults to `os.cpu_count()` (and `run_zenodo_build.sh` picks the same), with BLAS/OpenMP (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `NUMEXPR_NUM_THREADS`, `VECLIB_MAXIMUM_THREADS`) pinned to 1 thread per worker so N processes don't fight over the same cores; `--gdal-threads` caps GDAL's own threads per worker (default `2`).
+* **Progress bars for every step and stage** — `run` prints `▶ [3/9] features` / `✓ features 12.4s` and a master `pipeline 3/9` bar; each heavy loop (pool folders, scenes, value-domain probes, validation folders, archive entries, raw-audit files, QA modules) has its own bar. Interactive terminals get a live bar; `tee`/log output gets throttled `[progress] …` lines; `PROGRESS=0` disables everything.
+* **Immediate memory release** — full-scene arrays are dropped the moment derived data exists (raw bands after dB conversion, scene masks after planning/conversion), pool results are cleared as they are consumed, and the parent runs `gc.collect()` between pool chunks, so RAM never stacks up across scenes/folders on a long Zenodo run.
 * **Deterministic seeding** per `(scene folder, scene id)` — parallel scheduling no longer changes jitter/negative choices; reruns reproduce byte-identical plans.
 * **Resume** — folders with an existing `GEODATA.csv` are skipped unless `--force`.
 * **GPU only when real** — CUDA used if actually available; MPS/CPU never take a fake GPU path.
@@ -263,7 +266,7 @@ Console summary prints pass/warn/fail counts + `ready for pipeline: yes/no`
 ## Tests
 
 ```bash
-pytest tests/ -q          # 99 tests (74 pipeline + 25 QA)
+pytest tests/ -q          # 111 tests (86 pipeline + 25 QA)
 pytest tests/ -q -m "not slow"   # skip the end-to-end / standalone-stage runs
 ```
 

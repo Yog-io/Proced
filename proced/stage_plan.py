@@ -96,6 +96,8 @@ def plan_from_dict(d: dict) -> CropPlan:
 
 
 def process_plan_job(job: PlanJob):  # pragma: no cover - child
+    import gc
+
     scene, cfg = job.scene, job.cfg
     assert cfg is not None
     width, height = scene.width, scene.height
@@ -114,6 +116,8 @@ def process_plan_job(job: PlanJob):  # pragma: no cover - child
     plans = plan_crops(
         width, height, job.instances, mask, cfg, scene.scene_id, rng, has_mask=has_mask,
     )
+    mask = None  # scene-sized array freed immediately after planning
+    gc.collect()
     return scene.scene_id, [plan_to_dict(p) for p in plans]
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +35,8 @@ class PipelineConfig:
     state_dir: Path = ROOT / "data" / "state"
 
     # Concurrency / memory guardrails (archi.md §2)
-    workers: int = 4
+    # Default = every CPU core: the dataset PC should run all of them.
+    workers: int = field(default_factory=lambda: max(1, os.cpu_count() or 4))
     gdal_cache_mb_per_worker: int = 256
     gdal_num_threads: str = "2"
     pool_chunk: int = 16  # folders per executor before recycling (bounds worker memory growth)

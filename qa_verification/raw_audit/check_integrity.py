@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .._progress import bar as progress_bar
 from .discover_tree import DiscoveredFile, TreeDiscovery
 
 
@@ -48,55 +49,60 @@ def check_integrity(
     import rasterio
 
     res = IntegrityResult()
+    pb = progress_bar(len(discovery.rasters), "raw audit integrity", unit="file")
     # Always open header for every file; optionally sample a center window for domain.
-    for i, item in enumerate(discovery.rasters):
-        try:
-            with rasterio.open(str(item.path)) as ds:
-                width, height = ds.width, ds.height
-                count = ds.count
-                dtypes = list(ds.dtypes)
-                crs = str(ds.crs) if ds.crs else None
-                res.opened += 1
+    try:
+        for i, item in enumerate(discovery.rasters):
+            pb.update()
+            try:
+                with rasterio.open(str(item.path)) as ds:
+                    width, height = ds.width, ds.height
+                    count = ds.count
+                    dtypes = list(ds.dtypes)
+                    crs = str(ds.crs) if ds.crs else None
+                    res.opened += 1
 
-                domain = None
-                if sample_values and i < max_sample_values and count >= 1:
-                    try:
-                        h = min(64, height)
-                        w = min(64, width)
-                        x0 = max(0, (width - w) // 2)
-                        y0 = max(0, (height - h) // 2)
-                        arr = ds.read(1, window=((y0, y0 + h), (x0, x0 + w)))
-                        domain = _coarse_domain(arr)
-                    except Exception:
-                        domain = None
+                    domain = None
+                    if sample_values and i < max_sample_values and count >= 1:
+                        try:
+                            h = min(64, height)
+                            w = min(64, width)
+                            x0 = max(0, (width - w) // 2)
+                            y0 = max(0, (height - h) // 2)
+                            arr = ds.read(1, window=((y0, y0 + h), (x0, x0 + w)))
+                            domain = _coarse_domain(arr)
+                        except Exception:
+                            domain = None
 
-                res.snapshots.append({
+                    res.snapshots.append({
+                        "rel": item.rel,
+                        "width": width,
+                        "height": height,
+                        "count": count,
+                        "dtypes": dtypes,
+                        "crs": crs,
+                        "domain_guess": domain,
+                        "is_mask_by_name": item.is_mask_by_name,
+                    })
+
+                    ew, eh = res.expected_size
+                    if width and height:
+                        if (abs(width - ew) / ew > res.size_tol_frac
+                                or abs(height - eh) / eh > res.size_tol_frac):
+                            # Masks from other sources / small exports can be smaller —
+                            # only flag non-mask images as resolution outliers.
+                            if not item.is_mask_by_name:
+                                res.resolution_outliers.append({
+                                    "rel": item.rel,
+                                    "width": width,
+                                    "height": height,
+                                    "expected": [ew, eh],
+                                })
+            except Exception as exc:
+                res.failed.append({
                     "rel": item.rel,
-                    "width": width,
-                    "height": height,
-                    "count": count,
-                    "dtypes": dtypes,
-                    "crs": crs,
-                    "domain_guess": domain,
-                    "is_mask_by_name": item.is_mask_by_name,
+                    "error": f"{type(exc).__name__}: {exc}",
                 })
-
-                ew, eh = res.expected_size
-                if width and height:
-                    if (abs(width - ew) / ew > res.size_tol_frac
-                            or abs(height - eh) / eh > res.size_tol_frac):
-                        # Masks from other sources / small exports can be smaller —
-                        # only flag non-mask images as resolution outliers.
-                        if not item.is_mask_by_name:
-                            res.resolution_outliers.append({
-                                "rel": item.rel,
-                                "width": width,
-                                "height": height,
-                                "expected": [ew, eh],
-                            })
-        except Exception as exc:
-            res.failed.append({
-                "rel": item.rel,
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+    finally:
+        pb.close()
     return res

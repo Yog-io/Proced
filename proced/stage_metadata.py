@@ -15,6 +15,7 @@ from .metadata import (
     write_master_metadata,
     write_synthetic_assignments,
 )
+from .progress import bar as progress_bar
 from .state import (
     StatePaths,
     load_catalog,
@@ -43,45 +44,50 @@ def build_feature_rows(instances: List[dict], scenes: dict, geo: dict):
     """Shape-only and full (radiometric + geo-joined) classifier rows (C.0)."""
     shape_rows: List[dict] = []
     full_rows: List[dict] = []
-    for inst in instances:
-        sid = inst["scene_id"]
-        scene = scenes.get(sid)
-        g = geo.get(sid) or {}
-        base = {
-            "feature_id": f"{sid}_inst{int(inst['instance_index']):03d}",
-            "image_id": sid,
-            "instance_index": int(inst["instance_index"]),
-            "label": inst.get("label", ""),
-            "area": int(inst.get("area_px") or 0),
-            "perimeter": _f6(inst.get("perimeter")),
-            "aspect_ratio": _f6(inst.get("aspect_ratio")),
-            "boundary_complexity": _f6(inst.get("boundary_complexity")),
-            "fragment_count": int(inst.get("fragment_count") or 0),
-            "truncated_by_scene_edge": bool(inst.get("truncated_by_scene_edge")),
-            "eligible_for_classifier": not bool(inst.get("truncated_by_scene_edge")),
-            "crop_source_scene_id": inst.get("crop_source_scene_id", ""),
-            "dataset_source": inst.get("dataset_source", ""),
-        }
-        shape_rows.append(dict(base))
-        is_cal = bool(scene.is_calibrated) if scene else False
-        has_dual = bool(scene.has_dual_pol) if scene else False
-        full_rows.append({
-            **base,
-            "is_calibrated": _yn(is_cal),
-            "has_dual_pol": _yn(has_dual),
-            "damping_ratio": _f6(inst.get("damping_ratio")),
-            "damping_ratio_db": _f6(inst.get("damping_ratio_db")),
-            "boundary_gradient_steepness": _f6(inst.get("boundary_gradient_steepness")),
-            "backscatter_variance_ratio": _f6(inst.get("backscatter_variance_ratio")),
-            "glcm_contrast": _f6(inst.get("glcm_contrast")),
-            "glcm_homogeneity": _f6(inst.get("glcm_homogeneity")),
-            "ndpi": _f6(inst.get("ndpi")),
-            "lat": g.get("center_lat", ""),
-            "lon": g.get("center_lon", ""),
-            "timestamp_utc": g.get("timestamp_utc", ""),
-            "is_synthetic_location": bool(g.get("is_synthetic_location")),
-            "source_corridor_id": g.get("source_corridor_id", ""),
-        })
+    pb = progress_bar(len(instances), "metadata features", unit="instance")
+    try:
+        for inst in instances:
+            sid = inst["scene_id"]
+            scene = scenes.get(sid)
+            g = geo.get(sid) or {}
+            base = {
+                "feature_id": f"{sid}_inst{int(inst['instance_index']):03d}",
+                "image_id": sid,
+                "instance_index": int(inst["instance_index"]),
+                "label": inst.get("label", ""),
+                "area": int(inst.get("area_px") or 0),
+                "perimeter": _f6(inst.get("perimeter")),
+                "aspect_ratio": _f6(inst.get("aspect_ratio")),
+                "boundary_complexity": _f6(inst.get("boundary_complexity")),
+                "fragment_count": int(inst.get("fragment_count") or 0),
+                "truncated_by_scene_edge": bool(inst.get("truncated_by_scene_edge")),
+                "eligible_for_classifier": not bool(inst.get("truncated_by_scene_edge")),
+                "crop_source_scene_id": inst.get("crop_source_scene_id", ""),
+                "dataset_source": inst.get("dataset_source", ""),
+            }
+            shape_rows.append(dict(base))
+            is_cal = bool(scene.is_calibrated) if scene else False
+            has_dual = bool(scene.has_dual_pol) if scene else False
+            full_rows.append({
+                **base,
+                "is_calibrated": _yn(is_cal),
+                "has_dual_pol": _yn(has_dual),
+                "damping_ratio": _f6(inst.get("damping_ratio")),
+                "damping_ratio_db": _f6(inst.get("damping_ratio_db")),
+                "boundary_gradient_steepness": _f6(inst.get("boundary_gradient_steepness")),
+                "backscatter_variance_ratio": _f6(inst.get("backscatter_variance_ratio")),
+                "glcm_contrast": _f6(inst.get("glcm_contrast")),
+                "glcm_homogeneity": _f6(inst.get("glcm_homogeneity")),
+                "ndpi": _f6(inst.get("ndpi")),
+                "lat": g.get("center_lat", ""),
+                "lon": g.get("center_lon", ""),
+                "timestamp_utc": g.get("timestamp_utc", ""),
+                "is_synthetic_location": bool(g.get("is_synthetic_location")),
+                "source_corridor_id": g.get("source_corridor_id", ""),
+            })
+            pb.update()
+    finally:
+        pb.close()
     return shape_rows, full_rows
 
 

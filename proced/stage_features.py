@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 
@@ -75,6 +75,8 @@ def _r(v) -> Optional[float]:
 
 
 def process_feature_job(job: FeatureJob) -> FeatureResult:  # pragma: no cover - child
+    import gc
+
     scene, cfg = job.scene, job.cfg
     res = FeatureResult(scene_id=scene.scene_id)
     if scene.mask_path is None:
@@ -82,6 +84,7 @@ def process_feature_job(job: FeatureJob) -> FeatureResult:  # pragma: no cover -
         return res
 
     datasets, meta = load_scene_geometry(scene)
+    band_arrays = band_db = band_lin = mask = None
     try:
         width, height = int(meta["width"]), int(meta["height"])
         mask, has_mask = read_mask(scene, width, height)
@@ -92,9 +95,8 @@ def process_feature_job(job: FeatureJob) -> FeatureResult:  # pragma: no cover -
             res.notes.append("empty mask — no positive instances")
             return res
 
-        band_db = band_lin = None
         if scene.is_calibrated:
-            band_arrays: Dict[str, np.ndarray] = {}
+            band_arrays = {}
             for i, tag in enumerate(scene.pol_tags):
                 if tag not in ("VV", "VH"):
                     continue
@@ -107,6 +109,9 @@ def process_feature_job(job: FeatureJob) -> FeatureResult:  # pragma: no cover -
                 band_arrays, scene.value_domains, cfg
             )
             res.notes.extend(notes)
+            # Immediate RAM saving: the raw full-scene bands are redundant the
+            # moment dB/linear copies exist — drop them before feature work.
+            band_arrays = None
 
         feats: SceneFeatures = extract_full_extent_features(
             mask, cfg,
@@ -128,6 +133,10 @@ def process_feature_job(job: FeatureJob) -> FeatureResult:  # pragma: no cover -
                 ds.close()
             except Exception:
                 pass
+        # Free every full-scene array NOW (not when the frame exits) so a long
+        # worker run never stacks scene-sized buffers.
+        band_arrays = band_db = band_lin = mask = None
+        gc.collect()
 
 
 def run_features(cfg: PipelineConfig) -> List[dict]:
@@ -144,8 +153,12 @@ def run_features(cfg: PipelineConfig) -> List[dict]:
     for res in results:
         rows.extend(res.rows)
         errors.extend(res.errors)
+        res.rows.clear()  # immediate: rows now owned by `rows`, not the result
         for n in res.notes:
             log.debug("features %s: %s", res.scene_id, n)
+    results.clear()
+    import gc
+    gc.collect()
 
     # Deterministic order regardless of pool completion order
     rows.sort(key=lambda r: (r["scene_id"], r["instance_index"]))

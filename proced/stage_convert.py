@@ -120,6 +120,7 @@ def _build_row(
 
 
 def process_convert_job(job: ConvertJob) -> ConvertResult:  # pragma: no cover - child
+    import gc
     import time
     t0 = time.time()
     cfg = job.cfg
@@ -229,6 +230,10 @@ def process_convert_job(job: ConvertJob) -> ConvertResult:  # pragma: no cover -
                         ds.close()
                     except Exception:
                         pass
+                # Immediate RAM saving: drop the scene-sized mask/band window
+                # before the next scene of this folder is processed.
+                mask = None
+                gc.collect()
         except Exception as exc:
             res.errors.append(f"{scene.scene_id}: {type(exc).__name__}: {exc}")
             log.exception("convert failed for scene %s", scene.scene_id)
@@ -290,18 +295,23 @@ def run_convert(cfg: PipelineConfig) -> List[dict]:
         label="folders",
     )
 
+    errors: List[str] = []
     for res in results:
         all_rows.extend(res.rows)
+        errors.extend(res.errors)
+        res.rows.clear()  # immediate: rows now owned by `all_rows` only
+        res.errors.clear()
+    results.clear()
+    import gc
+    gc.collect()
 
     # Deterministic master order: by crop_id
     all_rows.sort(key=lambda r: str(r.get("crop_id", "")))
 
     paths.ensure_root()
     save_crop_rows(all_rows, paths.crop_rows)
-    n_err = sum(len(r.errors) for r in results)
     log.info("convert: %d crops from %d folders (%d skipped-resume, %d errors) → %s",
-             len(all_rows), len(jobs), skipped, n_err, paths.crop_rows)
-    for res in results:
-        for e in res.errors:
-            log.error("convert: %s", e)
+             len(all_rows), len(jobs), skipped, len(errors), paths.crop_rows)
+    for e in errors:
+        log.error("convert: %s", e)
     return all_rows

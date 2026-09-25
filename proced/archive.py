@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from .progress import bar as progress_bar
+
 log = logging.getLogger("proced.archive")
 
 
@@ -58,9 +60,15 @@ def pack_7z(source_dir: Path, output_archive: Path) -> Path:
 
     import py7zr
     log.info("Compressing %s into %s (py7zr fallback)...", source_dir, output_archive)
-    with py7zr.SevenZipFile(str(output_archive), mode="w") as z:
-        for p in sorted(source_dir.rglob("*")):
-            # Write directories too — empty dirs must survive the round-trip
-            # (directory-equivalence check depends on the full tree).
-            z.write(str(p), str(p.relative_to(source_dir)))
+    entries = sorted(source_dir.rglob("*"))
+    pb = progress_bar(len(entries), "archive pack", unit="entry")
+    try:
+        with py7zr.SevenZipFile(str(output_archive), mode="w") as z:
+            for p in entries:
+                # Write directories too — empty dirs must survive the round-trip
+                # (directory-equivalence check depends on the full tree).
+                z.write(str(p), str(p.relative_to(source_dir)))
+                pb.update()
+    finally:
+        pb.close()
     return output_archive

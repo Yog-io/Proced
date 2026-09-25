@@ -21,6 +21,7 @@ import pandas as pd
 
 from .config import PipelineConfig
 from .metadata import GEODATA_COLUMNS
+from .progress import bar as progress_bar
 
 REQUIRED_NULL_FREE = ("crop_bbox_corners", "is_partial_object", "truncated_by_scene_edge",
                       "crop_id", "label")
@@ -100,25 +101,30 @@ def validate_dataset(
         master_df = pd.read_csv(master_path).fillna("")
     geodata_problems: List[str] = []
     crop_folders = _folders_with_crops(dest_dir)
-    for folder in crop_folders:
-        gp = folder / "GEODATA.csv"
-        if not gp.is_file():
-            geodata_problems.append(f"{folder}: missing GEODATA.csv")
-            continue
-        try:
-            df = pd.read_csv(gp).fillna("")
-        except Exception as exc:
-            geodata_problems.append(f"{folder}: unreadable GEODATA.csv ({exc})")
-            continue
-        for col in GEODATA_COLUMNS:
-            if col not in df.columns:
-                geodata_problems.append(f"{folder}: missing column {col}")
-        for col in REQUIRED_NULL_FREE:
-            if col in df.columns:
-                empties = df[col].astype(str).str.strip() == ""
-                # parent_group_id may be blank only if absent entirely; required 3 must not be
-                if empties.any() and col in REQUIRED_NULL_FREE:
-                    geodata_problems.append(f"{folder}: {int(empties.sum())} null/empty '{col}'")
+    pb = progress_bar(len(crop_folders), "validate folders", unit="folder")
+    try:
+        for folder in crop_folders:
+            pb.update()  # count every folder as it starts (incl. early continues)
+            gp = folder / "GEODATA.csv"
+            if not gp.is_file():
+                geodata_problems.append(f"{folder}: missing GEODATA.csv")
+                continue
+            try:
+                df = pd.read_csv(gp).fillna("")
+            except Exception as exc:
+                geodata_problems.append(f"{folder}: unreadable GEODATA.csv ({exc})")
+                continue
+            for col in GEODATA_COLUMNS:
+                if col not in df.columns:
+                    geodata_problems.append(f"{folder}: missing column {col}")
+            for col in REQUIRED_NULL_FREE:
+                if col in df.columns:
+                    empties = df[col].astype(str).str.strip() == ""
+                    # parent_group_id may be blank only if absent entirely; required 3 must not be
+                    if empties.any() and col in REQUIRED_NULL_FREE:
+                        geodata_problems.append(f"{folder}: {int(empties.sum())} null/empty '{col}'")
+    finally:
+        pb.close()
     report["checks"]["geodata_integrity"] = {
         "folders_checked": len(crop_folders),
         "problems": geodata_problems[:20],

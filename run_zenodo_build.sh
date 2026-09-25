@@ -19,7 +19,10 @@ cd "$ROOT_REPO" || exit 1
 
 ZENODO_ROOT="${1:-${ZENODO_ROOT:-}}"
 SEED="${SEED:-42}"
-WORKERS="${WORKERS:-8}"
+# Default: use every CPU core on this machine (override with WORKERS=N).
+if [[ -z "${WORKERS:-}" ]]; then
+  WORKERS="$(python3 -c 'import os; print(os.cpu_count() or 8)')"
+fi
 PAIRS="${PAIRS:-2500}"
 DATE_TAG="$(date +%Y%m%d)"
 LOG_DIR="$ROOT_REPO/logs"
@@ -75,7 +78,7 @@ die_report() {
 }
 
 # ---------------------------------------------------------------- Step 0
-log "Step 0 — raw folder audit --root $ZENODO_ROOT"
+log "[Step 0/4] raw folder audit --root $ZENODO_ROOT"
 python3 qa_verification/raw_audit/run_raw_folder_audit.py \
   --root "$ZENODO_ROOT" \
   --out "$STEP0_JSON" 2>&1 | tee "$LOG_DIR/step0_raw_audit_${DATE_TAG}.log"
@@ -121,10 +124,10 @@ elif [[ $S0 -eq 32 ]]; then
 elif [[ $S0 -ne 0 ]]; then
   die_report 1 "Step 0 report parse failed (python rc=$S0)"
 fi
-log "Step 0 gate passed (quarantine/orphans/dups logged in report — proceed)"
+log "[Step 0/4] gate passed (quarantine/orphans/dups logged in report — proceed)"
 
 # ---------------------------------------------------------------- Step 1
-log "Step 1 — pipeline run seed=$SEED workers=$WORKERS (NO extract)"
+log "[Step 1/4] pipeline run seed=$SEED workers=$WORKERS of $(python3 -c 'import os; print(os.cpu_count() or 0)') cores (NO extract; PROGRESS=0 hides bars)"
 # DEST_DIR resolved above (default: sibling Zenodo-Dataset_final of ZENODO_ROOT)
 OUT_ARCHIVE="$ROOT_REPO/data/master_dataset_v1.7z"
 mkdir -p "$DEST_DIR"
@@ -135,7 +138,7 @@ python3 sar_dataset_pipeline.py run \
   --workers "$WORKERS" \
   --seed "$SEED" 2>&1 | tee "$STEP1_LOG"
 PIPE_RC=${PIPESTATUS[0]:-${pipestatus[1]:-0}}
-log "Step 1 exit=$PIPE_RC log=$STEP1_LOG"
+log "[Step 1/4] exit=$PIPE_RC log=$STEP1_LOG"
 
 RETRY_NOTE="no"
 if [[ $PIPE_RC -eq 2 ]]; then
@@ -178,7 +181,7 @@ elif [[ $PIPE_RC -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------- Step 2
-log "Step 2 — handoff scripts (mock/simple expected)"
+log "[Step 2/4] handoff scripts (mock/simple expected)"
 {
   echo "=== join_wind.py ==="
   python3 scripts/join_wind.py; echo "join_wind exit=$?"
@@ -187,10 +190,10 @@ log "Step 2 — handoff scripts (mock/simple expected)"
   echo "=== generate_model2_pairs.py ==="
   python3 scripts/generate_model2_pairs.py --pairs "$PAIRS"; echo "generate_model2_pairs exit=$?"
 } 2>&1 | tee "$STEP2_LOG"
-log "Step 2 done (see $STEP2_LOG)"
+log "[Step 2/4] done (see $STEP2_LOG)"
 
 # ---------------------------------------------------------------- Step 3
-log "Step 3 — independent QA verification seed=$SEED"
+log "[Step 3/4] independent QA verification seed=$SEED"
 export QA_STAGE_DIR="$ZENODO_ROOT"
 export QA_DEST_DIR="$DEST_DIR"
 export QA_STATE_DIR="$ROOT_REPO/data/state"
@@ -201,13 +204,13 @@ unset QA_OUTPUT_ARCHIVE QA_SOURCE_ARCHIVE 2>/dev/null || true
 
 python3 qa_verification/run_all_verification.py --seed "$SEED" 2>&1 | tee "$STEP3_LOG"
 QA_RC=${PIPESTATUS[0]:-${pipestatus[1]:-0}}
-log "Step 3 exit=$QA_RC log=$STEP3_LOG"
+log "[Step 3/4] exit=$QA_RC log=$STEP3_LOG"
 
 QA_FILE="$QA_REPORT"
 [[ -f "$QA_FILE" ]] || QA_FILE="$QA_REPORT_FALLBACK"
 
 # ---------------------------------------------------------------- Step 4
-log "Step 4 — write $STATUS_MD"
+log "[Step 4/4] write $STATUS_MD"
 python3 - "$STATUS_MD" "$DATE_TAG" "$ZENODO_ROOT" "$SEED" "$WORKERS" \
   "$PIPE_RC" "$QA_RC" "$STEP0_JSON" "$QA_FILE" "$STEP1_LOG" "$STEP2_LOG" "$STEP3_LOG" \
   "$DEST_DIR" "$OUT_ARCHIVE" <<'PY'

@@ -38,6 +38,7 @@ from qa_verification._lib import (  # noqa: E402
     Report,
     write_report,
 )
+from qa_verification._progress import bar as progress_bar  # noqa: E402
 
 
 # --------------------------------------------------------------------- registry
@@ -147,21 +148,28 @@ def build_report(
 
     reports: List[dict] = []
     errors: List[dict] = []
-    for name in sorted(selected):
-        fn = selected[name]
-        try:
-            rep = fn()
-            reports.append(rep.to_dict())
-        except Exception as exc:
-            errors.append({
-                "module": name,
-                "error": f"{type(exc).__name__}: {exc}",
-                "traceback": traceback.format_exc(limit=8),
-            })
-            # surface as hard failure so the suite never "passes" by crashing
-            fail = Report(name)
-            fail.hard(False, f"module crashed: {type(exc).__name__}: {exc}")
-            reports.append(fail.to_dict())
+    names = sorted(selected)
+    pb = progress_bar(len(names), "qa modules", unit="module")
+    try:
+        for name in names:
+            fn = selected[name]
+            pb.set_desc(f"qa {name}")
+            try:
+                rep = fn()
+                reports.append(rep.to_dict())
+            except Exception as exc:
+                errors.append({
+                    "module": name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "traceback": traceback.format_exc(limit=8),
+                })
+                # surface as hard failure so the suite never "passes" by crashing
+                fail = Report(name)
+                fail.hard(False, f"module crashed: {type(exc).__name__}: {exc}")
+                reports.append(fail.to_dict())
+            pb.update()
+    finally:
+        pb.close()
 
     n_hard = sum(r["n_hard_fail"] for r in reports)
     n_soft = sum(r["n_soft_fail"] for r in reports)

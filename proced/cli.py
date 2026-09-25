@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
 
 from .archive import unpack_7z
 from .config import PipelineConfig
+from .progress import StageProgress, progress_enabled
 from .stage_archive import run_archive
 from .stage_convert import run_convert
 from .stage_features import run_features
@@ -70,7 +71,9 @@ def add_common_args(p: argparse.ArgumentParser) -> None:
                    default=str(d / "reference" / "shipping_corridors.geojson"))
 
     p.add_argument("--workers", type=int, default=max(1, os.cpu_count() or 2),
-                   help="Parallel worker processes")
+                   help="Parallel worker processes (default: every CPU core)")
+    p.add_argument("--gdal-threads", type=str, default="2",
+                   help="GDAL_NUM_THREADS per worker (ALL / N)")
     p.add_argument("--tile-size", type=int, default=256)
     p.add_argument("--jitter", type=int, default=25, help="Compact-crop jitter ±px (spec 20-30)")
     p.add_argument("--stride", type=int, default=0, help="Overflow stride (0 => 50%% overlap)")
@@ -151,6 +154,7 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
         corridors_path=Path(corridors) if corridors else None,
         workers=max(1, int(getattr(args, "workers", 4))),
         gdal_cache_mb_per_worker=int(getattr(args, "gdal_cache_mb", 256)),
+        gdal_num_threads=str(getattr(args, "gdal_threads", "2") or "2"),
         tile_size=int(getattr(args, "tile_size", 256)),
         jitter_px=int(getattr(args, "jitter", 25)),
         stride=int(getattr(args, "stride", 0) or 0),
@@ -195,23 +199,61 @@ def run_pipeline(cfg: PipelineConfig) -> Dict:
             f"--archive <raw.7z> --stage_dir {stage_dir}"
         )
 
-    run_scan(cfg)
-    run_geo(cfg)
-    run_features(cfg)
-    run_plan(cfg)
-    rows = run_convert(cfg)
-    stats = run_metadata(cfg)
+    log.info(
+        "run: workers=%d (cpu_count=%s), gdal_threads=%s, gdal_cache=%dMB/worker, "
+        "pool_chunk=%d, progress=%s",
+        cfg.workers, os.cpu_count(), cfg.gdal_num_threads,
+        cfg.gdal_cache_mb_per_worker, cfg.pool_chunk,
+        "on" if progress_enabled() else "off",
+    )
 
-    splits_paths: Dict[str, Path] = {}
-    if rows:
-        splits_paths = run_split(cfg)
+    with StageProgress(9, desc="pipeline") as stages:
+        stages.begin("scan")
+        run_scan(cfg)
+        stages.end("scan")
 
-    if not cfg.no_pack:
-        run_archive(cfg)
+        stages.begin("geo")
+        run_geo(cfg)
+        stages.end("geo")
 
-    report = None
-    if not cfg.no_validate:
-        report = run_validate(cfg)
+        stages.begin("features")
+        run_features(cfg)
+        stages.end("features")
+
+        stages.begin("plan")
+        run_plan(cfg)
+        stages.end("plan")
+
+        stages.begin("convert")
+        rows = run_convert(cfg)
+        stages.end("convert")
+
+        stages.begin("metadata")
+        stats = run_metadata(cfg)
+        stages.end("metadata")
+
+        splits_paths: Dict[str, Path] = {}
+        if rows:
+            stages.begin("split")
+            splits_paths = run_split(cfg)
+            stages.end("split")
+        else:
+            stages.skip("split")
+
+        if not cfg.no_pack:
+            stages.begin("archive")
+            run_archive(cfg)
+            stages.end("archive")
+        else:
+            stages.skip("archive")
+
+        report = None
+        if not cfg.no_validate:
+            stages.begin("validate")
+            report = run_validate(cfg)
+            stages.end("validate")
+        else:
+            stages.skip("validate")
 
     summary = {
         "scenes": stats.get("full_rows", 0),  # replaced below

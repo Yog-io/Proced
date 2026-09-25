@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .catalog import Catalog, scan_tree
 from .config import PipelineConfig
+from .progress import bar as progress_bar
 from .scene_io import resolve_value_domains
 from .state import StatePaths, save_catalog
 
@@ -28,16 +29,22 @@ def run_scan(cfg: PipelineConfig) -> Catalog:
         log.error("catalog: %s", e)
 
     n_resolved = 0
-    for scene in cat.scenes:
-        try:
-            scene.value_domains = resolve_value_domains(scene, cfg)
-            n_resolved += 1
-        except Exception as exc:
-            cat.errors.append(f"{scene.scene_id}: domain resolve failed: {exc}")
-            scene.value_domains = {
-                t: ("native" if not scene.is_calibrated else cfg.value_domain)
-                for t in scene.pol_tags if t in ("VV", "VH")
-            }
+    pb = progress_bar(len(cat.scenes), "scan domains", unit="scene")
+    try:
+        for scene in cat.scenes:
+            try:
+                scene.value_domains = resolve_value_domains(scene, cfg)
+                n_resolved += 1
+            except Exception as exc:
+                cat.errors.append(f"{scene.scene_id}: domain resolve failed: {exc}")
+                scene.value_domains = {
+                    t: ("native" if not scene.is_calibrated else cfg.value_domain)
+                    for t in scene.pol_tags if t in ("VV", "VH")
+                }
+            finally:
+                pb.update()
+    finally:
+        pb.close()
 
     ensure_output_tree(cfg, cat)
 
