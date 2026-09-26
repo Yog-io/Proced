@@ -22,8 +22,14 @@ export DEST_DIR=/path/to/Zenodo-Dataset_final
 ./run_zenodo_build.sh "$ZENODO_ROOT"
 ```
 
+Windows (dataset PC is Windows — no bash / no env vars; single-dash args):
+
+```powershell
+python run_zenodo_build.py -path D:\Zenodo-dataset -seed 42 -workers 8 -dest D:\Zenodo-Dataset_final
+```
+
 - Pipeline + raw_audit + handoff scripts + `run_all_verification.py` all execute **on the dataset PC**, pointed at `$ZENODO_ROOT`.
-- Builder PC: develop/verify tools (111/111 green) and review `BUILD_STATUS_*.md` / logs after the run.
+- Builder PC: develop/verify tools (127/127 green) and review `BUILD_STATUS_*.md` / logs after the run.
 - Brief placeholder: `<path/to/extracted/zenodo/folder>` = `$ZENODO_ROOT` on the dataset PC.
 - **Never run `extract`** — data is already extracted on the dataset PC.
 - Scope: **Zenodo only** (no Kaggle/OSD this run).
@@ -123,13 +129,13 @@ If 1–3 fail: stop per §4, write honest report. Clear stop > forced “done”
 
 ## Builder-PC facts (for report / readiness)
 
-- Tests: **111/111** (86 pipeline + 25 QA), boundary clean (`qa_verification` never imports `proced/`).
+- Tests: **127/127** (86 pipeline + 16 runner + 25 QA), boundary clean (`qa_verification` never imports `proced/`).
 - Asymmetric Zenodo layout: sibling `*_images` / `*_mask` trees + nested subfolders paired; folder-based mask detection; output mirrors structure under `--dest_dir` (use `Zenodo-Dataset_final`).
 - `raw_audit/` modules: `discover_tree`, `check_integrity`, `check_pairing`, `check_duplicates`, `run_raw_folder_audit`.
 - Env: Python 3.9.6, rasterio 1.4.3, py7zr 1.0.0, 8 CPUs; no system `7z` CLI (pipeline uses py7zr fallback).
 - `data/` on builder PC is scaffolding only (`.gitkeep`, corridors, empty state) — **not** the dataset.
 - **Progress bars everywhere**: `run` prints `▶ [3/9] features` / `✓ features 12.4s` + a master `pipeline 3/9` bar; stages/loops (pool folders, scenes, raw-audit files, QA modules) each have their own bar. Interactive terminal = live bar, `tee` logs = throttled `[progress]` lines, `PROGRESS=0` = silent.
-- **CPU**: `--workers` defaults to every core (`WORKERS` env does the same in `run_zenodo_build.sh`); BLAS/OpenMP pinned to 1 thread per worker (processes do the parallelism), `--gdal-threads` per worker (default 2).
+- **CPU**: `--workers` defaults to every core (`run_zenodo_build.py -workers` / `WORKERS` env do the same); BLAS/OpenMP pinned to 1 thread per worker (processes do the parallelism), `--gdal-threads` per worker (default 2).
 - **RAM**: full-scene arrays freed immediately after use (raw bands → dB, masks after plan/convert), pool results cleared as consumed, `gc.collect()` between pool chunks — memory does not stack up across scenes/folders.
 - Related downloads (not the full extracted tree): mask `.7z`s + GEO CSVs under `~/Downloads` (2048² masks, Colab paths); notebook `Part1_Zenodo_SeaSentinel.ipynb` points at Zenodo record **8346860** (`01_Train_Val_Oil_Spill_images.7z`).
 
@@ -139,7 +145,7 @@ If 1–3 fail: stop per §4, write honest report. Clear stop > forced “done”
 
 - [x] Understand brief §0–§6; notes + runner prepared on builder PC
 - [x] Topology confirmed: clone Proced → dataset PC; path = run argument
-- [ ] Copy/clone this repo onto dataset PC (`run_zenodo_build.sh` included)
+- [ ] Copy/clone this repo onto dataset PC (`run_zenodo_build.py` + `.sh` wrapper included)
 - [ ] `pip install -r requirements.txt` on dataset PC
 - [ ] Set `ZENODO_ROOT` / pass path → Step 0 raw audit + apply §4.1
 - [ ] Step 1 pipeline run seed 42 → exit code + log
@@ -170,6 +176,8 @@ export WORKERS=8
 
 # Full gated run (Steps 0→4): logs under logs/, report BUILD_STATUS_<date>.md
 ./run_zenodo_build.sh "$ZENODO_ROOT"
+# Windows / no-bash equivalent (single-dash args):
+python run_zenodo_build.py -path "$ZENODO_ROOT" -seed 42 -workers 8
 
 # Or step-by-step (same as brief §1):
 python qa_verification/raw_audit/run_raw_folder_audit.py --root "$ZENODO_ROOT"

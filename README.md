@@ -23,6 +23,13 @@ This repo **implements** those specs and fixes the issues found in
 ```bash
 pip install -r requirements.txt
 
+# Full gated Zenodo build (brief Steps 0–4) — cross-platform entry point;
+# single-dash args work on Windows (PowerShell/cmd) as well as macOS/Linux:
+python run_zenodo_build.py -path /path/to/extracted/zenodo -seed 42 -workers 8
+python run_zenodo_build.py -path D:\Zenodo-dataset -seed 42 -workers 8
+#   (./run_zenodo_build.sh is a thin POSIX wrapper around the same script;
+#    exit 0 = all gates passed, 2 = QA/validate fail, 3 = Step 0 STOP, 1 = harness error)
+
 # 1) Unpack is a SEPARATE subcommand — the pipeline never auto-extracts.
 #    (Or point --stage_dir at a tree you already extracted yourself.)
 python sar_dataset_pipeline.py extract \
@@ -62,7 +69,7 @@ python scripts/validate_dataset.py
 python scripts/join_wind.py            # → data/features/lookalike_training_data.csv  (Model Training)
 python scripts/generate_ais.py         # → data/ais/ais_tracks.csv                    (Backend)
 python scripts/generate_model2_pairs.py --pairs 2500   # → data/synthetic/model2_pairs/ (Model Training)
-pytest tests/ -q                       # 111 tests incl. end-to-end + standalone stages
+pytest tests/ -q                       # 127 tests incl. end-to-end + standalone stages
 ```
 
 ---
@@ -266,7 +273,7 @@ Console summary prints pass/warn/fail counts + `ready for pipeline: yes/no`
 ## Tests
 
 ```bash
-pytest tests/ -q          # 111 tests (86 pipeline + 25 QA)
+pytest tests/ -q          # 127 tests (86 pipeline + 16 runner + 25 QA)
 pytest tests/ -q -m "not slow"   # skip the end-to-end / standalone-stage runs
 ```
 
@@ -282,4 +289,6 @@ archive) · **every stage runnable standalone** · `run` rejects `--archive`
 with a hint to use `extract` · **independent QA suite** (boundary rule, dB
 round-trip, shape/plan recompute, full `run_all_verification` on a fixture) ·
 **raw-folder pre-pipeline audit** (discovery, integrity, pairing, duplicates,
-CLI exit codes, sibling-tree pairing).
+CLI exit codes, sibling-tree pairing) · **gated build runner**
+(`run_zenodo_build.py`: single-dash `-path/-seed/-workers` CLI for Windows,
+§4.1 stop gates, `BUILD_STATUS_*.md` writer, streamed step logs).

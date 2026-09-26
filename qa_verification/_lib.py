@@ -11,6 +11,7 @@ import json
 import math
 import os
 import random
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -293,17 +294,15 @@ def detect_domain_independent(arr: np.ndarray) -> str:
 
 
 def parse_corners(s: str) -> List[Tuple[float, float]]:
-    """Parse GEODATA crop_bbox_corners string → [(lon, lat), ...]."""
-    s = str(s).strip()
-    if not s.startswith("["):
-        raise ValueError(f"bad corners: {s[:40]}")
-    inner = s.strip("[]")
-    pts = []
-    for part in inner.split("),("):
-        part = part.strip().strip("()")
-        lon, lat = part.split(",")
-        pts.append((float(lon), float(lat)))
-    return pts
+    """Parse GEODATA crop_bbox_corners string → [(lon, lat), ...].
+
+    format_corners() renders ``[(lon, lat), (lon, lat)]`` (separator ``), ``);
+    tolerate any spacing and plain-number/scientific-notation coords.
+    """
+    pairs = re.findall(r"\(\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\)", str(s))
+    if not pairs:
+        raise ValueError(f"bad corners: {str(s)[:40]}")
+    return [(float(lon), float(lat)) for lon, lat in pairs]
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

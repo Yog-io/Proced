@@ -102,26 +102,28 @@ def run(
         differ = sorted(k for k in set(h1) & set(h2) if h1[k] != h2[k])
         s_differ = sorted(k for k in set(s1) & set(s2) if s1[k] != s2[k])
 
+        # pipeline_summary.json is volatile: embeds elapsed_s + per-run paths.
+        volatile = [k for k in differ if k.endswith("pipeline_summary.json")]
+        real_diffs = [k for k in differ if k not in set(volatile)]
+
         rep.hard(
-            not only1 and not only2 and not differ,
+            not only1 and not only2 and not real_diffs,
             f"byte-identical dest trees across 2 seeded runs "
             f"({len(h1)} files)"
-            if not only1 and not only2 and not differ
+            if not only1 and not only2 and not real_diffs
             else f"determinism broken: +{len(only1)}/{len(only2)} files, "
-                 f"{len(differ)} content diffs",
+                 f"{len(real_diffs)} content diffs",
             only_run1=only1[:20],
             only_run2=only2[:20],
-            content_diffs=differ[:20],
+            content_diffs=real_diffs[:20],
+            volatile_diffs=volatile[:20],
             state_diffs=s_differ[:20],
         )
-        # pipeline_summary.json / logs may embed elapsed_s — exclude from hard
-        volatile = [k for k in differ if k.endswith("pipeline_summary.json")]
-        real_diffs = [k for k in differ if k not in volatile]
-        if differ and not real_diffs:
+        if volatile and not real_diffs and not only1 and not only2:
             rep.soft(
                 True,
-                "only volatile pipeline_summary.json differs (elapsed_s) — "
-                "crop bytes identical",
+                "only volatile pipeline_summary.json differs (elapsed_s / "
+                "run paths) — crop bytes identical",
                 volatile=volatile,
             )
     return rep

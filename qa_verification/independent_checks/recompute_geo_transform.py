@@ -239,7 +239,7 @@ def _min_poly_km(lat, lon, waypoints):
 
 def _heading_at_closest(lat, lon, waypoints) -> float:
     """Bearing of the polyline segment nearest to (lat, lon)."""
-    from .._lib import point_segment_distance_km, bearing
+    from .._lib import point_segment_distance_km
     best = None
     for i in range(len(waypoints) - 1):
         la1, lo1 = waypoints[i]

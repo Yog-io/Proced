@@ -92,9 +92,15 @@ def run(paths: QAPaths, *, sample: int = 30, seed: int = 42) -> Report:
     # --- multi-part completeness (Zenodo) ---------------------------------
     archive = paths.source_archive
     if archive is None:
-        # discover a nearby raw archive under data/raw or data/
+        # discover a raw input .7z under data/, never the pipeline's own output
+        out = Path(paths.output_archive) if paths.output_archive else None
         candidates = list((ROOT / "data").rglob("*.7z"))
         candidates += list((ROOT / "data").rglob("*.7z.001"))
+        candidates = [
+            c for c in candidates
+            if not (out is not None and c.resolve() == out.resolve())
+            and not c.name.startswith("master_dataset")
+        ]
         archive = candidates[0] if candidates else None
 
     if archive is not None and Path(archive).exists():

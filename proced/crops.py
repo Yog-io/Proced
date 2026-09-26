@@ -16,8 +16,8 @@ Decides WHERE every 256×256 window goes, before any pixel is read:
 
 from __future__ import annotations
 
+import hashlib
 import math
-import uuid
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -47,6 +47,12 @@ class CropPlan:
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(v, hi))
+
+
+def _group_id(*parts: object) -> str:
+    """Stable 12-hex-char parent_group_id (seeded runs must be byte-identical —
+    uuid4 would differ every process and break QA adversarial_determinism)."""
+    return hashlib.sha1("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()[:12]
 
 
 def axis_positions(start: int, length: int, limit: int, size: int, stride: int,
@@ -86,7 +92,7 @@ def plan_crops(
 
     for inst in instances:
         x, y, w, h = inst.bbox
-        group = uuid.uuid4().hex[:12]
+        group = _group_id(scene_id, inst.instance_index)
         fits = w <= size and h <= size
         if fits:
             # Compact: centroid-centered + jitter, clamped to scene bounds
@@ -150,7 +156,7 @@ def plan_crops(
     want_neg = min(want_neg, cfg.max_neg_per_scene)
 
     if want_neg > 0 and scene_w >= size and scene_h >= size:
-        neg_group = uuid.uuid4().hex[:12]
+        neg_group = _group_id(scene_id, "neg")
         candidates = _negative_candidates(pos_binary, size, cfg.neg_buffer_px)
         if len(candidates) > 0:
             take = min(want_neg, len(candidates))
