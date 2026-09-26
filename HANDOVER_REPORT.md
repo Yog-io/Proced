@@ -20,13 +20,14 @@ A production pipeline that turns raw Sentinel-1 / SAR oil-spill image trees
   re-computes everything from raw inputs without importing pipeline code.
 
 **Repo**: `/Users/yogesh/Desktop/Proced` · git `origin = https://github.com/Yog-io/Proced.git`
-· branch `main` · HEAD `3aab8e1` (3 commits, pushed, clean tree).
+· branch `main` · HEAD `7084d45` (4 commits, pushed, clean tree).
 
 | commit | content |
 |---|---|
 | `1ffa075` | initial pipeline + QA suite (111 files) |
 | `ce9c11c` | asymmetric Zenodo sibling `*_images`/`*_mask` tree support |
 | `3aab8e1` | progress bars per step/stage, all-core CPU defaults, immediate RAM freeing (111 tests) |
+| `7084d45` | Windows-friendly `run_zenodo_build.py` (`-path/-seed/-workers`), deterministic `parent_group_id`, QA checker fixes (127 tests) |
 
 Two-machine topology (important):
 * **Builder PC** (this machine, macOS): code + tests only; `data/` is scaffolding, NOT the dataset.
@@ -293,7 +294,7 @@ columns / split leakage / non-binary masks / bad bearing = hard fails.
 
 ---
 
-## 10. Performance, CPU, memory, progress (as of `3aab8e1`)
+## 10. Performance, CPU, memory, progress (as of `7084d45`)
 
 * **CPU**: `--workers` (CLI *and* `PipelineConfig` default) = `os.cpu_count()`;
   `run_zenodo_build.py` (and the `.sh` wrapper) default `-workers`/`WORKERS`
@@ -348,6 +349,29 @@ columns / split leakage / non-binary masks / bad bearing = hard fails.
   degrade gracefully).
 * Soft findings (class imbalance, visual spot-check flags, mock-wind rows) are
   reported but do not block handoff; hard findings do.
+
+### Fixes landed in `7084d45` (surfaced by running the gated runner end-to-end)
+
+No check was weakened — these were genuine defects (three in QA checkers,
+one in the pipeline's own determinism):
+
+* `proced/crops.py` — `parent_group_id` came from `uuid4` (new every process),
+  so two seeded runs produced different `metadata.csv`/`GEODATA.csv`. Now a
+  stable `sha1(scene_id|instance)` / `sha1(scene_id|neg)`; QA
+  `adversarial_determinism` passes for real.
+* `qa_verification/_lib.parse_corners` — split on `),(` while `format_corners`
+  renders `), ` (with space), so **every** parse raised and stage3a's corner
+  check silently degraded into parse errors. Regex-based parser now; the
+  affine recompute genuinely matches the pipeline's corners.
+* `qa_verification/.../test_determinism.py` — `rep.hard` ran on the unfiltered
+  diff list, so the volatile `pipeline_summary.json` (elapsed_s + per-run
+  paths) hard-failed every run; filtering now happens first (soft note kept).
+* `qa_verification/.../recompute_extract.py` — with no `QA_SOURCE_ARCHIVE` it
+  auto-picked `data/master_dataset_v1.7z`, i.e. the pipeline's **own output**,
+  guaranteeing an "extract missing entries" hard-fail; the output archive is
+  now excluded from discovery (skip = info, not fail).
+* `qa_verification/.../recompute_geo_transform.py` — imported non-existent
+  `_lib.bearing`, so stage3a_geo crashed (hard-fail) on every run.
 
 ---
 
